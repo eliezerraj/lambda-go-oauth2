@@ -87,6 +87,23 @@ Parameters:
     Type: String
     Default: arn:aws:lambda:us-east-2:580247275435:layer:LambdaInsightsExtension:60 # https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/Lambda-Insights-extension-versionsx86-64.html
 
+  VPCSubnetA:
+    Description: Lambda deploy SubNet A
+    Type: String
+    Default: subnet-0ca2d45be9d6ab5bc
+  VPCSubnetB:
+    Description: Lambda deploy SubNet B
+    Type: String
+    Default: subnet-0b2b57acbb1da0623
+  VPCSubnetC:
+    Description: Lambda deploy SubNet C
+    Type: String
+    Default: subnet-05d3e7f4611c12a23
+  VPCSecurityGroup:
+    Description: Lambda deploy Security Group
+    Type: String
+    Default: sg-071e23394778596b2
+
 Conditions:
   IsManagedPolicyParameterOne:    !Not [!Equals [ !Ref ManagedPolicyParameterOne, "" ]]
   IsManagedPolicyParameterTwo:    !Not [!Equals [ !Ref ManagedPolicyParameterTwo, "" ]]
@@ -129,6 +146,11 @@ Resources:
             - "ssm:GetParameter"
             - "xray:PutTraceSegments"
             - "xray:PutTelemetryRecords"
+            - "ec2:CreateNetworkInterface",
+            - "ec2:DescribeNetworkInterfaces",
+            - "ec2:DeleteNetworkInterface",
+            - "ec2:AssignPrivateIpAddresses",
+            - "ec2:UnassignPrivateIpAddresses"
             Resource: "*"
 
   LambdaFunction: 
@@ -179,7 +201,14 @@ Resources:
           OTEL_AWS_APPLICATION_SIGNALS_ENABLED: 'false'
           OTEL_METRICS_EXPORTER: 'awsemf'
           OPENTELEMETRY_COLLECTOR_CONFIG_URI : '/var/task/collector.yaml'
-
+      
+      VpcConfig:
+        SecurityGroupIds:
+          - Ref: VPCSecurityGroup	
+        SubnetIds:
+          - Ref: VPCSubnetA
+          - Ref: VPCSubnetB
+          - Ref: VPCSubnetC
       Role: 
         Fn::GetAtt: 
           - "LambdaExecutionRole"
