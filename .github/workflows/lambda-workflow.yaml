@@ -67,7 +67,7 @@ jobs:
       run: GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -v -o bootstrap $MAIN_GO_FILE
 
     - name: Zip image
-      run: zip main.zip bootstrap
+      run: zip main.zip bootstrap collector.yaml
 
     - name: Save image tmp folder
       uses: actions/upload-artifact@v4
