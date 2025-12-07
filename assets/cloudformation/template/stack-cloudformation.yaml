@@ -178,6 +178,7 @@ Resources:
           OTEL_SERVICE_NAME: !Ref FunctionLambdaName
           OTEL_AWS_APPLICATION_SIGNALS_ENABLED: 'false'
           OTEL_METRICS_EXPORTER: 'awsemf'
+          OPENTELEMETRY_COLLECTOR_CONFIG_URI : '/var/task/collector.yaml'
 
       Role: 
         Fn::GetAtt: 

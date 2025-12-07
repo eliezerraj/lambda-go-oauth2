@@ -10,17 +10,21 @@ receivers:
         endpoint: "0.0.0.0:4318"
 
 exporters:
-  logging:
-  awsxray:
+  otlp:
+    endpoint: "grafana.architecture.caradhras.io:4317" 
+    tls:
+      insecure: true
+  otlp/tempo-all:
+    endpoint: "http://grafana.architecture.caradhras.io:4318"
+    tls:
+      insecure: true
+  debug:
 
 service:
   pipelines:
     traces:
       receivers: [otlp]
-      exporters: [awsxray]
+      exporters: [otlp]
     metrics:
       receivers: [otlp]
-      exporters: [logging]
-  telemetry:
-    metrics:
-      address: 0.0.0.0:8888
+      exporters: [debug]
