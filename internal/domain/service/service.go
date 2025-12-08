@@ -145,18 +145,11 @@ func(w *WorkerService) GeneratePolicyFromClaims(ctx context.Context,
 		if claims.ApiAccessKey != "" {
 			authResponse.UsageIdentifierKey = claims.ApiAccessKey
 		} else {
-			// check insert usage-plan
-			if claims.Tier != "" {
-				if claims.Tier == "tier1" {
-					//authResponse.UsageIdentifierKey = w.awsService.DefaultApiKeyUsePlan1
-				} else if claims.Tier == "tier2" { 
-					//authResponse.UsageIdentifierKey = w.awsService.DefaultApiKeyUsePlan2
-				} else if claims.Tier == "tier3"{
-					//authResponse.UsageIdentifierKey = w.awsService.DefaultApiKeyUsePlan3
-				} else {
-					//authResponse.UsageIdentifierKey = w.awsService.DefaultApiKeyUsePlan1
-				}
-			}
+			// Insert a default
+			w.logger.Warn().
+			 		Str("func","GeneratePolicyFromClaims").
+					Msg("API_KEY for usage plan NOT INFORMED, ingested the DEFAULT !!!")
+			authResponse.UsageIdentifierKey = "API_ACCESS_KEY_DEFAULT_001"
 		}
 	}
 	w.logger.Info().
