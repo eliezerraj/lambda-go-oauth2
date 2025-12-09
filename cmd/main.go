@@ -7,7 +7,7 @@ import(
 	"context"
 
 	"github.com/rs/zerolog"
-	//"github.com/aws/aws-lambda-go/lambda" //enable this line for run in AWS
+	"github.com/aws/aws-lambda-go/lambda" //enable this line for run in AWS
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 
 	"github.com/lambda-go-oauth2/shared/log"
@@ -25,10 +25,10 @@ import(
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/contrib/instrumentation/github.com/aws/aws-sdk-go-v2/otelaws"
-	//"go.opentelemetry.io/contrib/instrumentation/github.com/aws/aws-lambda-go/otellambda" //enable this line for run in AWS
+	"go.opentelemetry.io/contrib/instrumentation/github.com/aws/aws-lambda-go/otellambda" //enable this line for run in AWS
 	// ---------------------------  use it for a mock local ---------------------------
-	"encoding/json"  
-	"github.com/aws/aws-lambda-go/events" 
+	//"encoding/json"  
+	//"github.com/aws/aws-lambda-go/events" 
 	// ---------------------------  use it for a mock local ---------------------------	
 )
 
@@ -234,7 +234,7 @@ func main (){
 		},
 	}*/
 	
-	mockEvent := events.APIGatewayCustomAuthorizerRequestTypeRequest{
+	/*mockEvent := events.APIGatewayCustomAuthorizerRequestTypeRequest{
 		Type:       "TOKEN",
 		MethodArn:  "arn:aws:execute-api:us-east-2:908671954593:k0ng1bdik7/qa/GET/account/info",
 		RequestContext: events.APIGatewayCustomAuthorizerRequestTypeRequestContext{
@@ -253,9 +253,9 @@ func main (){
 	}else {
 		s, _ := json.MarshalIndent(res, "", "\t")
 		fmt.Println(string(s))
-	}
+	}*/
 	// ----------------------------------------------------------------------	
 
 	// Start handler
-	//lambda.Start(otellambda.InstrumentHandler(lambdaServer.LambdaHandlerRequest),)
+	lambda.Start(otellambda.InstrumentHandler(lambdaServer.LambdaHandlerRequest),)
 }
