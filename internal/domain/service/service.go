@@ -13,6 +13,9 @@ import (
 	"github.com/lambda-go-oauth2/internal/domain/model"
 
 	go_core_otel_trace "github.com/eliezerraj/go-core/v2/otel/trace"
+
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
 )
 
 var tracerProvider go_core_otel_trace.TracerProvider
@@ -135,6 +138,12 @@ func(w *WorkerService) GeneratePolicyFromClaims(ctx context.Context,
 	authResponse.Context = make(map[string]interface{})
 	authResponse.Context["authMessage"] = policyData.Message
 	authResponse.Context["tenant_id"] = "NO-TENANT"
+
+	// Insert the w3c traces. Lambda work with xray
+	appCarrier := propagation.MapCarrier{}
+	otel.GetTextMapPropagator().Inject(ctx, appCarrier)
+	authResponse.Context["tracestate"] = appCarrier["tracestate"]
+	authResponse.Context["traceparent"] = appCarrier["traceparent"]
 
 	if claims != nil {
 		// check insert jwt-id

@@ -7,7 +7,7 @@ import(
 	"context"
 
 	"github.com/rs/zerolog"
-	"github.com/aws/aws-lambda-go/lambda" //enable this line for run in AWS
+	//"github.com/aws/aws-lambda-go/lambda" //enable this line for run in AWS
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 
 	"github.com/lambda-go-oauth2/shared/log"
@@ -25,11 +25,10 @@ import(
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/contrib/instrumentation/github.com/aws/aws-sdk-go-v2/otelaws"
-	"go.opentelemetry.io/contrib/instrumentation/github.com/aws/aws-lambda-go/otellambda" //enable this line for run in AWS
-	"go.opentelemetry.io/contrib/propagators/aws/xray"
+	//"go.opentelemetry.io/contrib/instrumentation/github.com/aws/aws-lambda-go/otellambda" //enable this line for run in AWS
 	// ---------------------------  use it for a mock local ---------------------------
-	//"encoding/json"  
-	//"github.com/aws/aws-lambda-go/events" 
+	"encoding/json"  
+	"github.com/aws/aws-lambda-go/events" 
 	// ---------------------------  use it for a mock local ---------------------------	
 )
 
@@ -131,8 +130,7 @@ func main (){
 
 		otel.SetTextMapPropagator(
     		propagation.NewCompositeTextMapPropagator(
-				propagation.TraceContext{}, // W3C
-				xray.Propagator{},          // AWS
+				propagation.TraceContext{}, 
 				propagation.Baggage{},
     		),
 		)
@@ -235,7 +233,8 @@ func main (){
 			"Authorization": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl91c2UiOiJhY2Nlc3MiLCJpc3MiOiJnby1vYXV0aCIsInZlcnNpb24iOiIzIiwiand0X2lkIjoiYWVjMWNkMDgtOGQ2YS00OTMzLThiNTctZjZjZDI5NTA1ODJiIiwidXNlcm5hbWUiOiJhZG1pbiIsInNjb3BlIjpbImFkbWluIl0sImV4cCI6MTc0MTc1OTk1M30.TY6TSKY1Xr-IdIaN6yEcQFTG6zHXBgxQj8XGcDBu4jLI0bK20cCzmvCEi40sVof52RTc5i5fXSeFqRC17Ua7jdVY-DW9iT17nacjHeJl4d1A3pVGM1bTVRttRe2_klSB7hgvKyesCUKbHbUqJW_7iZY_ld_0BW7Vr6v7sINcZfrg-lWWV2xqI8wIRUAZERA8MzIykVIDkJoM4Ee6YRICDVGXsKCMMxjOhSPIqxV20K6ew-4wgRoeB5SvQiCa2_Oi3TuC1mcm6lqHPHpqyjf6rpIctiE9kfAQXISnO7_5-fe4Ptyrx3KdN4Vyq5w5cSPBL7jHbzk27KKSO3FiyEVFfHKGBfUPCC24xxWDaMJcyw1t_WRyKal4FvWrlsIPsF9lhxrJzOCk1mwNkJ3XWHaWI-6gk_EIOvk0r1syFjeEWGlTTQpiyxl0EI0231shCDlGsDzzNjKDaBdEZ4IK3lGEclPGKk0Ss1TjK3ntRdfQtIq2HCYzq4hGslAf2hzQSYyS7vNwnM6uZojg6k6oaIlGszeRsbwfXaLCPdMBfif6h3K0aEPfv6EMYOae933P3NvcAPCCLREOzeblo7dv-mayQdmOzf7bZfuCDvH_e04TWEcDOGznGnlhOk_DvJCDaa0DNF9iG3EFoA7cye8IGtxHiFci-XejSavscZ2WrAZg7LE",
 		},
 	}*/
-	/*mockEvent := events.APIGatewayCustomAuthorizerRequestTypeRequest{
+	
+	mockEvent := events.APIGatewayCustomAuthorizerRequestTypeRequest{
 		Type:       "TOKEN",
 		MethodArn:  "arn:aws:execute-api:us-east-2:908671954593:k0ng1bdik7/qa/GET/account/info",
 		RequestContext: events.APIGatewayCustomAuthorizerRequestTypeRequestContext{
@@ -254,10 +253,9 @@ func main (){
 	}else {
 		s, _ := json.MarshalIndent(res, "", "\t")
 		fmt.Println(string(s))
-	}*/
+	}
 	// ----------------------------------------------------------------------	
 
-	lambda.Start(
-		otellambda.InstrumentHandler(lambdaServer.LambdaHandlerRequest),
-	)
+	// Start handler
+	//lambda.Start(otellambda.InstrumentHandler(lambdaServer.LambdaHandlerRequest),)
 }
