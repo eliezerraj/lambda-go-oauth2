@@ -7,7 +7,7 @@ import(
 	"context"
 
 	"github.com/rs/zerolog"
-	"github.com/aws/aws-lambda-go/lambda" //enable this line for run in AWS
+
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 
 	"github.com/lambda-go-oauth2/shared/log"
@@ -21,10 +21,11 @@ import(
 	go_core_aws_s3 "github.com/eliezerraj/go-core/v2/aws/s3"
 
 	// traces
-	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
-	"go.opentelemetry.io/contrib/instrumentation/github.com/aws/aws-sdk-go-v2/otelaws"
+	"go.opentelemetry.io/contrib/propagators/aws/xray"
+
+	"github.com/aws/aws-lambda-go/lambda" //enable this line for run in AWS
 	"go.opentelemetry.io/contrib/instrumentation/github.com/aws/aws-lambda-go/otellambda" //enable this line for run in AWS
 	// ---------------------------  use it for a mock local ---------------------------
 	//"encoding/json"  
@@ -33,36 +34,32 @@ import(
 )
 
 // Global variables
-var ( 
-	appLogger 	zerolog.Logger
-	logger		zerolog.Logger
-	appServer	model.AppServer
+type AppContext struct {
+	Logger           zerolog.Logger
+	Server           *model.AppServer
+	TracerProvider   *go_core_otel_trace.TracerProvider
+}
 
-	appInfoTrace 		go_core_otel_trace.InfoTrace
-	appTracerProvider 	go_core_otel_trace.TracerProvider
-	sdkTracerProvider 	*sdktrace.TracerProvider
-)
+// Global logger for init and main entry point only
+var initLogger zerolog.Logger
 
-// About init
+// init sets up global logger for startup
 func init(){
 	// Load application info
 	application := config.GetApplicationInfo()
-	awsService 	:= config.GetAwsServiceEnv()
-
-	appServer.Application = &application
-	appServer.AwsService = &awsService
-
+	
 	// Log setup	
 	writers := []io.Writer{os.Stdout}
 
-	if	application.StdOutLogGroup {
+	if application.StdOutLogGroup {
 		file, err := os.OpenFile(application.LogGroup, 
 								os.O_APPEND|os.O_CREATE|os.O_WRONLY, 
 								0644)
 		if err != nil {
-			panic(fmt.Sprintf("Failed to open log file: %v", err))
+			fmt.Fprintf(os.Stderr, "WARNING: failed to open log file '%s': %v\n", application.LogGroup, err)
+		} else {
+			writers = append(writers, file)
 		}
-		writers = append(writers, file)
 	} 
 	multiWriter := io.MultiWriter(writers...)
 
@@ -79,73 +76,51 @@ func init(){
 	}
 
 	// prepare log
-	appLogger = zerolog.New(multiWriter).
+	initLogger = zerolog.New(multiWriter).
 						With().
 						Timestamp().
 						Str("component", application.Name).
 						Logger().
 						Hook(log.TraceHook{}) // hook the app shared log
-
-	// set a logger
-	logger = appLogger.With().
-						Str("package", "main").
-						Logger()
-		
-	// load configs					
-	otelTrace 	:= config.GetOtelEnv()
-	appServer.EnvTrace = &otelTrace	
 }
 
-// About main
-func main (){
-	logger.Info().
-			Msgf("STARTING APP version: %s",appServer.Application.Version)
-	logger.Info().
-			Interface("appServer", appServer).Send()
-			
-	// create context and otel log provider
-	ctx, cancel := context.WithCancel(context.Background())
+// setupAppContext initializes all application dependencies
+func setupAppContext(ctx context.Context) (*AppContext, error) {
+	logger := initLogger.With().
+			Str("package", "main").
+			Logger()
+
+	// Load all configurations with proper error handling
+	configLoader := config.NewConfigLoader(&initLogger)
+	
+	allConfigs, err := configLoader.LoadAll()
+	if err != nil {
+		return nil, fmt.Errorf("configuration loading FAILED: %w", err)
+	}
+
+	// Build AppServer
+	appServer := &model.AppServer{
+		Application:    allConfigs.Application,
+		AwsService:     allConfigs.AwsService,
+		EnvTrace:       allConfigs.OtelTrace,
+	}
+
+	// Setup OTEL tracer if enabled
+	var tracerProvider *go_core_otel_trace.TracerProvider
+	if appServer.Application.OtelTraces {
+		tracerProvider = setupTracerProvider(ctx, appServer, &logger)
+	}
 
 	awsCfg, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(appServer.AwsService.AwsRegion))
 	if err != nil {
-		logger.Fatal().
-			   Err(err).Send()
-		os.Exit(3)
-	}
-
-	if appServer.Application.OtelTraces {
-		// Otel over aws services
-		otelaws.AppendMiddlewares(&awsCfg.APIOptions)
-
-		appInfoTrace.Name = appServer.Application.Name
-		appInfoTrace.Version = appServer.Application.Version
-		appInfoTrace.ServiceType = "lambda-workload"
-		appInfoTrace.Env = appServer.Application.Env
-		appInfoTrace.Account = appServer.Application.Account
-
-		sdkTracerProvider = appTracerProvider.NewTracerProvider(ctx, 
-																*appServer.EnvTrace, 
-																appInfoTrace,
-																&appLogger)
-
-		otel.SetTextMapPropagator(
-    		propagation.NewCompositeTextMapPropagator(
-				propagation.TraceContext{}, 
-				propagation.Baggage{},
-    		),
-		)
-
-		otel.SetTracerProvider(sdkTracerProvider)
-		sdkTracerProvider.Tracer(appServer.Application.Name)
+		return nil, fmt.Errorf("configuration awsCfg: %w", err)
 	}
 
 	// Load application keys
 	bucketS3, err := go_core_aws_s3.NewAwsBucketS3(	&awsCfg,
-										      		&appLogger)
+										      		&logger)
 	if err != nil {
-		logger.Fatal().
-			   Err(err).Send()
-		os.Exit(3)
+		return nil, fmt.Errorf("configuration s3: %w", err)
 	}
 
 	// Load the private key
@@ -155,39 +130,34 @@ func main (){
 											appServer.AwsService.FilePathRSA,
 											appServer.AwsService.FileNameRSAPrivKey )
 	if err != nil{
-		logger.Fatal().
-			   Err(err).Send()
-		os.Exit(3)
+		return nil, fmt.Errorf("configuration get priv keys from s3: %w", err)
 	}
 
 	rsaPrivate, err := certificate.ParsePemToRSAPriv(privateKey,
-													 &appLogger)
+													 &logger)
 	if err != nil{
-		logger.Fatal().
-			   Err(err).Send()
-		os.Exit(3)
+		return nil, fmt.Errorf("configuration parse priv keys to pem: %w", err)
 	}
 
 	// Load the private key
-	publicKey, err := bucketS3.GetObject( ctx, 
-											appServer.AwsService.BucketNameRSAKey,
-											appServer.AwsService.FilePathRSA,
-											appServer.AwsService.FileNameRSAPubKey )
+	publicKey, err := bucketS3.GetObject(ctx, 
+										 appServer.AwsService.BucketNameRSAKey,
+										 appServer.AwsService.FilePathRSA,
+										 appServer.AwsService.FileNameRSAPubKey)
 	if err != nil{
-		logger.Fatal().
-			   Err(err).Send()
-		os.Exit(3)
+		return nil, fmt.Errorf("configuration get pub keys from s3: %w", err)
 	}
 
 	rsaPublic, err := certificate.ParsePemToRSAPub(publicKey,
-												   &appLogger)
+												   &logger)
 	if err != nil{
-		logger.Fatal().
-			   Err(err).Send()
-		os.Exit(3)
+		return nil, fmt.Errorf("configuration parse pub keys to pem: %w", err)
 	}
 
 	// Load everything in rsa key model
+	rsaKey.AuthenticationModel = appServer.Application.AuthenticationModel
+	rsaKey.Kid = appServer.AwsService.Kid
+
 	rsaKey.HsaKey 		= "SECRET-12345" // for simplicity 
 	rsaKey.RsaPublic 	= rsaPublic
 	rsaKey.RsaPrivate 	= rsaPrivate
@@ -195,35 +165,91 @@ func main (){
 	rsaKey.RsaPublicPem = string(*publicKey)
 	appServer.RsaKey 	= &rsaKey	
 
-	// Wire 
-	workerService := service.NewWorkerService(&appServer,
-											  &appLogger)
+	return &AppContext{
+		Logger:         logger,
+		Server:         appServer,
+		TracerProvider: tracerProvider,
+	}, nil
+}
+
+// setupTracerProvider initializes OpenTelemetry tracer
+func setupTracerProvider(ctx context.Context, appServer *model.AppServer, logger *zerolog.Logger) *go_core_otel_trace.TracerProvider {
+	appInfoTrace := go_core_otel_trace.InfoTrace{
+		Name:        appServer.Application.Name,
+		Version:     appServer.Application.Version,
+		ServiceType: "lambda-workload",
+		Env:         appServer.Application.Env,
+		Account:     appServer.Application.Account,
+	}
+
+	tracerProvider := go_core_otel_trace.NewTracerProvider(	ctx,
+															*appServer.EnvTrace,
+															appInfoTrace,
+															logger)
+
+	otel.SetTextMapPropagator(
+    	propagation.NewCompositeTextMapPropagator(
+			propagation.TraceContext{}, // W3C
+			xray.Propagator{},          // AWS
+			propagation.Baggage{},
+    	),
+	)
+	otel.SetTracerProvider(tracerProvider.TracerProvider)
+
+	return tracerProvider
+}
+
+// About main
+func main (){
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Initialize all dependencies
+	appCtx, err := setupAppContext(ctx)
+	if err != nil {
+		initLogger.Fatal().
+			Err(err).
+			Msg("FAILED to initialize application context")
+	}
+
+	appCtx.Logger.Info().
+		Msgf("STARTING workload version: %s", appCtx.Server.Application.Version)
+
+	appCtx.Logger.Info().
+		Interface("server", appCtx.Server).
+		Send()
 	
 	// Cancel everything
+	// Setup graceful shutdown and cleanup
 	defer func() {
-		// cancel log provider
-		if sdkTracerProvider != nil {
-			err := sdkTracerProvider.Shutdown(ctx)
-			if err != nil{
-				logger.Error().
-				       Ctx(ctx).
-					   Err(err). 
-					   Msg("Erro to shutdown tracer provider")
+		appCtx.Logger.Info().
+			Msg("Shutting down application")
+
+		// Shutdown tracer provider
+		if appCtx.TracerProvider != nil && appCtx.TracerProvider.TracerProvider != nil {
+			if err := appCtx.TracerProvider.TracerProvider.Shutdown(ctx); err != nil {
+				appCtx.Logger.Error().
+					Ctx(ctx).
+					Err(err).
+					Msg("Error shutting down tracer provider")
 			}
 		}
-		
-		// cancel context
+
+		// Cancel context
 		cancel()
 
-		logger.Info().
-			   Ctx(ctx).
-			   Msgf("App %s Finalized SUCCESSFULL !!!", appServer.Application.Name)
+		appCtx.Logger.Info().
+			Msgf("workload ** %s ** shutdown completed SUCCESSFULLY", appCtx.Server.Application.Name)
 	}()
 
+	// Wire 
+	workerService := service.NewWorkerService(appCtx.Server, &appCtx.Logger, appCtx.TracerProvider)
+
 	// Create Lambda Server										   
-	lambdaServer := server.NewLambdaServer(&appServer,
+	lambdaServer := server.NewLambdaServer(appCtx.Server,
 											workerService,
-	 									    &appLogger)
+	 									    &appCtx.Logger,
+											appCtx.TracerProvider)
 
 	// ----------------------------------------------------------------------	
 	/*mockEvent := events.APIGatewayCustomAuthorizerRequestTypeRequest{
@@ -241,15 +267,16 @@ func main (){
 			RequestID: "request-id-12345",
 		},
 		Headers: map[string]string{
-			"Authorization": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl91c2UiOiJhY2Nlc3MiLCJpc3MiOiJnby1vYXV0aC1sYW1iZGEiLCJ2ZXJzaW9uIjoiMi4yIiwiand0X2lkIjoiNjcwN2JlZTYtZjBlZi00OTQ4LTllMjAtMWFkMGZhYzc3NDc0IiwidXNlcm5hbWUiOiJ1c2VyLTAzIiwidGllciI6InRpZXItMDMiLCJhcGlfYWNjZXNzX2tleSI6IkFQSV9BQ0NFU1NfS0VZX1VTRVJfMDMiLCJzY29wZSI6WyJ0ZXN0LnJlYWQiLCJ0ZXN0LndyaXRlIiwiYWRtaW4iXSwiZXhwIjoxNzY1NTAxOTAxfQ.k6bisWp9AytELB9bQ73oJh6vnlURUt4FS0n8F4IZpzvQetH_KdYlq-6ONV0NLrUzId8PJLTjm0rJ25CzT5BLl1JGyXNRRvrbjZknqYB313gs9LQpIhZjgFnjJ_9XASEiBYGN_zH6Ql8e9Kzzk_HDTOpVY_yKpjlc1qz1rZ3pmr-FvafdbyP4QpHftu1vIbrPTfW3ucHvqg1liwRS1C7lyfgMQyOZRScZ9xs7WnB835HHDrfwUhblHbCYntqi3sZgrtn9oO0CRmAtmlux2feeuPzS7zdJtPuOh3NBp79aVy9ojfgijDj7fdY-0nsejy-r9DAZfuHT5dg7ZlqX-PUqrGOHT8qUt6xJOs5idey_I_N15ZZKcI6AgyjxeIN6yIDuDozO-VSm7m-bMtsT1ilSKiMJYaUVU6CACl2QvHxBUrn6OSKL8GTNco8hkPH31Hi63AWPVuqPuGQK-iJw3Q2jSpz8KfCdJqLMpHZocjXGuULNXLmZTdh8-GGWo1SOyfJCLWhrdbu5f02SmXsliX0QZQzozklKcvEsucv6-WzvDvnA2F_4pY9afRK3bX2QWxTGoK4guAOq7gU8U-S8zUbsYIYCec_-aDOrGi3XsPaWGf_LixBn3tL8AkDmxExbf1TN2yJgT3Nh__UkKL5QHa4vCibvVgHkWgipNu3TrPvb4d0",
+			"Authorization": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl91c2UiOiJhY2Nlc3MiLCJpc3MiOiJsYW1iZGEtZ28taWRlbnRpZHkubG9jYWxob3N0IiwidmVyc2lvbiI6IjEuMCIsInVzZXJuYW1lIjoiYWRtaW4tdGVzdC0wMyIsImp3dF9pZCI6ImY3ZmUxYzdiLTBhZTItNGFkNS04OWY0LTVhMWY5NDg3ZDNkNSIsImtpZCI6ImF1dGgta2V5OnNlcnZlci1wdWJsaWMua2V5IiwidGllciI6InRpZXIxIiwic2NvcGUiOlsidGVzdC5yZWFkIiwidGVzdC53cml0ZSIsImFkbWluIl0sImV4cCI6MTc3MDE0NjQ4MH0.nw25nyjcvJ0kqFE-a5nE3vLzqAN5oW3Hj_Gdtgv18WE",
 		},
 	}
 
 	res, err := lambdaServer.LambdaHandlerRequest(ctx, 
 									 			 mockEvent)
 	if err != nil {
-		logger.Error().
-			   Err(err).Send()
+		appCtx.Logger.
+			Error().
+			Err(err).Send()
 	}else {
 		s, _ := json.MarshalIndent(res, "", "\t")
 		fmt.Println(string(s))
