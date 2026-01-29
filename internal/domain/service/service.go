@@ -12,21 +12,17 @@ import (
 	"github.com/lambda-go-oauth2/shared/erro"
 	"github.com/lambda-go-oauth2/internal/domain/model"
 
-	go_core_otel_trace "github.com/eliezerraj/go-core/v2/otel/trace"
+	"go.opentelemetry.io/otel/trace"
 
-	//"go.opentelemetry.io/otel"
-	//"go.opentelemetry.io/otel/propagation"
+	go_core_otel_trace "github.com/eliezerraj/go-core/v2/otel/trace"
 )
 
-var tracerProvider go_core_otel_trace.TracerProvider
-
 type WorkerService struct {
-	appServer *model.AppServer
-	logger 	  *zerolog.Logger
+	appServer 		*model.AppServer
+	logger 	  		*zerolog.Logger
+	tracerProvider 	*go_core_otel_trace.TracerProvider
 
-	TokenSignedValidation func(string, 
-							   interface{},
-							   *zerolog.Logger) (*model.JwtData, error)
+	TokenSignedValidation func(string, interface{}, *zerolog.Logger) (*model.JwtData, error)
 }
 
 // ------------------------- RSA ------------------------------/
@@ -35,7 +31,7 @@ func tokenValidationRSA(bearerToken string,
 						rsaPubKey interface{},
 						logger *zerolog.Logger)( *model.JwtData, error){
 	logger.Info().
-			Str("func","tokenValidationRSA").Send()
+		Str("func","tokenValidationRSA").Send()
 
 	claims := &model.JwtData{}
 	tkn, err := jwt.ParseWithClaims(bearerToken, 
@@ -64,7 +60,7 @@ func tokenValidationHS256(bearerToken string,
 						  logger *zerolog.Logger) ( *model.JwtData, error){
 
 	logger.Info().
-			Str("func","TokenValidationHS256").Send()
+		Str("func","TokenValidationHS256").Send()
 
 	claims := &model.JwtData{}
 	tkn, err := jwt.ParseWithClaims(bearerToken, claims, func(token *jwt.Token) (interface{}, error) {
@@ -87,13 +83,14 @@ func tokenValidationHS256(bearerToken string,
 // ------------------------- Support ------------------------------/
 // About new worker service
 func NewWorkerService(appServer *model.AppServer,
-					  appLogger *zerolog.Logger) *WorkerService{
+					  appLogger *zerolog.Logger,
+					  tracerProvider *go_core_otel_trace.TracerProvider) *WorkerService{
 
 	logger := appLogger.With().
 						Str("package", "domain.service").
 						Logger()
 	logger.Info().
-			Str("func","NewWorkerService").Send()
+		Str("func","NewWorkerService").Send()
 
 	var tokenSignedValidation func(string, interface{}, *zerolog.Logger) (*model.JwtData, error)
 
@@ -106,6 +103,7 @@ func NewWorkerService(appServer *model.AppServer,
 	return &WorkerService{
 		appServer: appServer,
 		logger: &logger,
+		tracerProvider: tracerProvider,
 		TokenSignedValidation: tokenSignedValidation,
 	}
 }
@@ -115,10 +113,11 @@ func(w *WorkerService) GeneratePolicyFromClaims(ctx context.Context,
 												policyData model.PolicyData,
 												claims *model.JwtData) (events.APIGatewayCustomAuthorizerResponse){
 	w.logger.Info().
-			 Str("func","GeneratePolicyFromClaims").Send()
+		Ctx(ctx).
+		Str("func","GeneratePolicyFromClaims").Send()
 	
 	// trace
-	ctx, span := tracerProvider.SpanCtx(ctx, "service.GeneratePolicyFromClaims")
+	ctx, span := w.tracerProvider.SpanCtx(ctx, "service.GeneratePolicyFromClaims", trace.SpanKindServer)
 	defer span.End()
 
 	// Setup the policy
@@ -139,41 +138,43 @@ func(w *WorkerService) GeneratePolicyFromClaims(ctx context.Context,
 	authResponse.Context["authMessage"] = policyData.Message
 	authResponse.Context["tenant_id"] = "NO-TENANT"
 
-	// Insert the w3c traces. Lambda work with xray
-	/*appCarrier := propagation.MapCarrier{}
-	otel.GetTextMapPropagator().Inject(ctx, appCarrier)
-	authResponse.Context["tracestate"] = appCarrier["tracestate"]
-	authResponse.Context["traceparent"] = appCarrier["traceparent"]*/
-
 	if claims != nil {
 		// check insert jwt-id
 		if claims.JwtId != "" {
 			authResponse.Context["jwt_id"] = claims.JwtId
 		}
+
+		// insert kid		
+		if claims.Kid != "" {
+			authResponse.Context["kid"] = claims.Kid
+		}
+		
 		// if the ApiAccessKey is informed used it
 		if claims.ApiAccessKey != "" {
 			authResponse.UsageIdentifierKey = claims.ApiAccessKey
 		} else {
 			// Insert a default
 			w.logger.Warn().
-			 		Str("func","GeneratePolicyFromClaims").
-					Msg("API_KEY for usage plan NOT INFORMED, ingested the DEFAULT !!!")
+				Ctx(ctx).
+				Msg("API_KEY for usage plan NOT INFORMED, ingested the DEFAULT !!!")
 			authResponse.UsageIdentifierKey = "API_ACCESS_KEY_DEFAULT_001"
 		}
 	}
 	w.logger.Info().
-			 Interface("authResponse", authResponse).Send()
+		Ctx(ctx).
+		Interface("authResponse", authResponse).Send()
 
 	return authResponse
 }
 
-// About insert session data
+// About Scope validation (naive only for test)
 func(w *WorkerService) ScopeValidation (ctx context.Context, claims model.JwtData, arn string) bool{
 	w.logger.Info().
-			Str("func","ScopeValidation").Send()
+		Ctx(ctx).
+		Str("func","ScopeValidation").Send()
 	
 	// trace
-	ctx, span := tracerProvider.SpanCtx(ctx, "service.ScopeValidation")
+	ctx, span := w.tracerProvider.SpanCtx(ctx, "service.ScopeValidation", trace.SpanKindServer)
 	defer span.End()
 
 	// valid the arn
@@ -185,7 +186,7 @@ func(w *WorkerService) ScopeValidation (ctx context.Context, claims model.JwtDat
 	var pathScope, methodScope string
 	for _, scopeListItem := range claims.Scope {
 		// Split ex: versiom.read in 2 parts
-		scopeSlice := strings.Split(scopeListItem, ".")
+		scopeSlice := strings.Split(scopeListItem, ":")
 		pathScope = scopeSlice[0]
 		
 		// In this case when just method informed it means the all methods are allowed (ANY)
@@ -194,13 +195,15 @@ func(w *WorkerService) ScopeValidation (ctx context.Context, claims model.JwtDat
 		if len(scopeSlice) == 1 {
 			if pathScope == "admin" {
 				w.logger.Debug().
-						 Msg("++++++++++ TRUE ADMIN ++++++++++++++++++")
+					Ctx(ctx).
+					Msg("++++++++++ TRUE ADMIN ++++++++++++++++++")
 				return true
 			}
 			// if the path is equal scope, ex: info (informed) is equal info (scope)
 			if strings.Contains(path, scopeSlice[0]) {
 				w.logger.Debug().
-						 Msg("++++++++++ NO ADMIN BUT SCOPE ANY ++++++++++++++++++")
+					Ctx(ctx).
+					Msg("++++++++++ NO ADMIN BUT SCOPE ANY ++++++++++++++++++")
 				return true
 			}
 		// both was given path + method
@@ -208,16 +211,17 @@ func(w *WorkerService) ScopeValidation (ctx context.Context, claims model.JwtDat
 			// In this case it would check the method and the scope(path)
 			// Ex: path/scope (version.read)
 			w.logger.Debug().
-					 Interface("scopeListItem....", scopeListItem).Msg("")
+				Ctx(ctx).
+				Interface("scopeListItem....", scopeListItem).Msg("")
 
 			methodScope = scopeSlice[1]
 
 			if pathScope == path {
 				w.logger.Debug().
-				         Msg("PASS - Paths equals !!!")
+				    Msg("PASS - Paths equals !!!")
 				if method == "ANY" {
 					w.logger.Debug().
-					          Msg("ALLOWED - method ANY!!!")
+					    Msg("ALLOWED - method ANY!!!")
 					return true
 				} else if 	(method == "GET" && methodScope == "read" ) || 
 							(method == "POST" && methodScope == "write" ) ||
@@ -225,7 +229,7 @@ func(w *WorkerService) ScopeValidation (ctx context.Context, claims model.JwtDat
 							(method == "PATCH" && methodScope == "update") ||
 							(method == "DELETE" && methodScope == "delete"){
 							w.logger.Debug().
-							         Msg("ALLOWED - Methods equals !!!")
+							    Msg("ALLOWED - Methods equals !!!")
 					return true
 				} 
 			}

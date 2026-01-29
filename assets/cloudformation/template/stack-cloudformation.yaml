@@ -177,7 +177,8 @@ Resources:
           REGION: 'us-east-2'
           SECRET_NAME: 'SECRET-12345'
           DYNAMO_TABLE_NAME: 'user_login_2'
-
+          KID: 'server-public.key'
+          
           RSA_BUCKET_NAME_KEY: 'docktech-eliezer-908671954593-truststore-mtls'
           RSA_FILE_PATH: /
           RSA_PRIV_FILE_KEY: server-private.key

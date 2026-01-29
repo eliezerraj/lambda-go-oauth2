@@ -34,6 +34,7 @@ type Application struct {
 type AwsService struct {
 	AwsRegion			string `json:"aws_region"`
 	DynamoTableName		string `json:"dynamo_table_name"`
+	Kid					string 	`json:"kid"`	
 	SecretName			string `json:"secret_name"`
 	BucketNameRSAKey	string `json:"bucket_rsa_key,omitempty"`
 	FilePathRSA			string `json:"path_rsa_key,omitempty"`
@@ -69,6 +70,7 @@ type RsaKey struct{
 	HsaKey			string	`json:"hsa_key"`
 	RsaPrivatePem	string	`json:"rsa_private_pem"`
 	RsaPublicPem 	string	`json:"rsa_public_pem"`
+	Kid				string 	`json:"kid"`
 	CrlPem 			string	`json:"crl_pem"`
 	CaCert			string	`json:"ca_cert"` 
 	RsaPrivate 		*rsa.PrivateKey `json:"rsa_private"`
@@ -87,8 +89,9 @@ type JwtData struct {
 	Version			string 	`json:"version"`
 	JwtId			string 	`json:"jwt_id"`
 	Username		string 	`json:"username"`
-	Tier			string 	`json:"tier"`
-	ApiAccessKey	string 	`json:"api_access_key"`
+	Kid				string 	`json:"kid"`
+	Tier			string 	`json:"tier"` 			// use in plan usage rate-limit
+	ApiAccessKey	string 	`json:"api_access_key"` // use in plan usage rate-limit
 	Scope	  		[]string `json:"scope"`
 	jwt.RegisteredClaims
 }
@@ -100,7 +103,7 @@ type Jwks struct{
 type JwtKeyInfo struct{
 	Type		string 	`json:"kty"`
 	Algorithm	string 	`json:"alg"`
-	JwtId		string 	`json:"kid"`
+	Kid			string 	`json:"kid"`
 	NBase64		string 	`json:"n"`
 }
 
