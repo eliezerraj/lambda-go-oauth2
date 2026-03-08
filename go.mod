@@ -7,7 +7,7 @@ toolchain go1.24.12
 require (
 	github.com/aws/aws-lambda-go v1.50.0
 	github.com/aws/aws-sdk-go-v2/config v1.32.3
-	github.com/eliezerraj/go-core v1.0.107
+	github.com/eliezerraj/go-core v1.0.109
 	github.com/golang-jwt/jwt/v5 v5.3.0
 	github.com/google/uuid v1.6.0
 	github.com/rs/zerolog v1.34.0
